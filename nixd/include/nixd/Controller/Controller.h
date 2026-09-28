@@ -41,7 +41,22 @@ private:
   AttrSetClient *nixpkgsClient() { return nixpkgsEval().client(); }
 
   void evalExprWithProgress(AttrSetClient &Client, const EvalExprParams &Params,
-                            std::string_view Description);
+                            std::string_view Description,
+                            std::function<void()> OnDone = nullptr);
+
+  /// \brief Restart every option worker configured with `reloadOnSave`, and
+  /// evaluate its expression again.
+  ///
+  /// Restarting is the point. An evaluator caches the files it has parsed, so
+  /// re-sending the same expression to a live worker yields the same answer
+  /// whatever the workspace now says.
+  void reloadOptions();
+
+  /// \brief Whether a reload is running, and whether one was asked for while
+  /// it ran. Saving a dozen files should cost one reload after the current
+  /// one, not a dozen restarts.
+  bool OptionsReloading = false;     // GUARDED_BY(OptionsLock)
+  bool OptionsReloadPending = false; // GUARDED_BY(OptionsLock)
 
   lspserver::DraftStore Store;
 
@@ -247,6 +262,8 @@ private:
   //---------------------------------------------------------------------------/
   // Workspace features
   //---------------------------------------------------------------------------/
+  void onDidSave(const lspserver::DidSaveTextDocumentParams &Params);
+
   void onDidChangeConfiguration(
       const lspserver::DidChangeConfigurationParams &Params);
 

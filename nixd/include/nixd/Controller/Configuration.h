@@ -19,6 +19,18 @@ struct Configuration {
   struct OptionProvider {
     /// \brief Expression to eval. Select this attrset as eval .options
     std::string expr;
+
+    /// \brief Re-read this provider when a file in the workspace is saved.
+    ///
+    /// Off by default. The option tree is otherwise fixed for the lifetime of
+    /// the server, so declaring a new option means restarting it — which is
+    /// right for `nixosOptions` pinned to a release and wrong for an expression
+    /// reading the workspace being edited.
+    ///
+    /// Reloading replaces the worker rather than re-evaluating inside it: an
+    /// evaluator caches every file it has parsed, so asking the same one again
+    /// returns the same answer however much the file changed.
+    bool reloadOnSave = false;
   };
 
   std::map<std::string, OptionProvider> options;

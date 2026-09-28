@@ -1,4 +1,7 @@
 #include "nixd/Controller/Controller.h"
+
+#include <atomic>
+#include <utility>
 #include "nixd/Eval/Launch.h"
 
 #include <boost/asio/post.hpp>
@@ -28,7 +31,8 @@ bool nixd::fromJSON(const Value &Params, Configuration::Formatting &R,
 bool nixd::fromJSON(const Value &Params, Configuration::OptionProvider &R,
                     llvm::json::Path P) {
   ObjectMapper O(Params, P);
-  return O && O.mapOptional("expr", R.expr);
+  return O && O.mapOptional("expr", R.expr) &&
+         O.mapOptional("reloadOnSave", R.reloadOnSave);
 }
 
 bool nixd::fromJSON(const Value &Params, Configuration::NixpkgsProvider &R,
@@ -47,10 +51,76 @@ bool nixd::fromJSON(const Value &Params, Configuration &R, llvm::json::Path P) {
       ;
 }
 
+void Controller::onDidSave(const lspserver::DidSaveTextDocumentParams &) {
+  // The option tree is otherwise fixed for the server's lifetime. Which
+  // providers want this is their own configuration; one reading a pinned
+  // release wants nothing to do with it.
+  reloadOptions();
+}
+
 void Controller::onDidChangeConfiguration(
     const DidChangeConfigurationParams &Params) {
   // FIXME: incrementally change?
   fetchConfig();
+}
+
+void Controller::reloadOptions() {
+  std::vector<std::pair<std::string, std::string>> Reload;
+  {
+    std::lock_guard CG(ConfigLock);
+    std::lock_guard OG(OptionsLock);
+
+    if (OptionsReloading) {
+      // One is already running. Whatever prompted this will be picked up when
+      // it finishes, because evaluation reads the files as they are then.
+      OptionsReloadPending = true;
+      return;
+    }
+
+    for (const auto &[Name, Opt] : Config.options) {
+      if (Opt.reloadOnSave)
+        Reload.emplace_back(Name, Opt.expr);
+    }
+    if (Reload.empty())
+      return;
+
+    OptionsReloading = true;
+
+    for (const auto &[Name, _] : Reload) {
+      // Replace the worker rather than re-evaluating in it. An evaluator caches
+      // every file it has parsed, so the same expression in the same process
+      // returns the same answer however much the workspace has changed.
+      Options[Name].reset();
+      startOption(Name, Options[Name]);
+    }
+  }
+
+  // Outside the locks: the completion hook takes them, and it may run inline.
+  auto Remaining = std::make_shared<std::atomic<size_t>>(Reload.size());
+  for (const auto &[Name, Expr] : Reload) {
+    AttrSetClient *Client = nullptr;
+    {
+      std::lock_guard OG(OptionsLock);
+      if (Options[Name])
+        Client = Options[Name]->client();
+    }
+    auto Done = [this, Remaining]() {
+      if (--*Remaining != 0)
+        return;
+      bool Again = false;
+      {
+        std::lock_guard OG(OptionsLock);
+        OptionsReloading = false;
+        Again = std::exchange(OptionsReloadPending, false);
+      }
+      if (Again)
+        reloadOptions();
+    };
+    if (Client)
+      evalExprWithProgress(*Client, Expr, Name + " (reload)", Done);
+    else
+      Done();
+  }
 }
 
 void Controller::updateConfig(Configuration NewConfig) {

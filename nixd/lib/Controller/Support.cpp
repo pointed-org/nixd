@@ -118,6 +118,8 @@ Controller::Controller(std::unique_ptr<lspserver::InboundPort> In,
   // Workspace features
   Registry.addNotification("workspace/didChangeConfiguration", this,
                            &Controller::onDidChangeConfiguration);
+  Registry.addNotification("textDocument/didSave", this,
+                           &Controller::onDidSave);
 
   WorkspaceConfiguration = mkOutMethod<ConfigurationParams, llvm::json::Value>(
       "workspace/configuration");
