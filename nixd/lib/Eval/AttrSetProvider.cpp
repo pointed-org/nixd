@@ -346,8 +346,11 @@ void AttrSetProvider::onOptionInfo(
       return;
     }
 
+    // `Keep`: this is hover and go-to-definition, which want the option that
+    // the path names -- including when that option's type is a submodule.
     nix::Value Option = nixt::selectOptions(
-        state(), Nixpkgs, nixt::toSymbols(state().symbols, AttrPath));
+        state(), Nixpkgs, nixt::toSymbols(state().symbols, AttrPath),
+        nixt::TerminalSubmodule::Keep);
 
     OptionInfoResponse R;
 

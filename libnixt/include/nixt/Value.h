@@ -41,14 +41,28 @@ nix::Value &selectAttrPath(nix::EvalState &State, nix::Value &V,
                            std::vector<nix::Symbol>::const_iterator Begin,
                            std::vector<nix::Symbol>::const_iterator End);
 
+/// \brief What to return when the attrpath ends on a submodule option.
+enum class TerminalSubmodule {
+  /// \brief Return the option itself, with its type, description and
+  /// declarations. What hover and go-to-definition want.
+  Keep,
+  /// \brief Return the submodule's sub-options. What completion wants: it has
+  /// popped the name being typed, so the path ends one level above the names
+  /// it must offer.
+  Unwrap,
+};
+
 /// \brief Select the option declaration list, \p V,  dive into "submodules".
 nix::Value selectOptions(nix::EvalState &State, nix::Value &V,
                          std::vector<nix::Symbol>::const_iterator Begin,
-                         std::vector<nix::Symbol>::const_iterator End);
+                         std::vector<nix::Symbol>::const_iterator End,
+                         TerminalSubmodule Terminal = TerminalSubmodule::Unwrap);
 
-inline nix::Value selectOptions(nix::EvalState &State, nix::Value &V,
-                                const std::vector<nix::Symbol> &AttrPath) {
-  return selectOptions(State, V, AttrPath.begin(), AttrPath.end());
+inline nix::Value selectOptions(
+    nix::EvalState &State, nix::Value &V,
+    const std::vector<nix::Symbol> &AttrPath,
+    TerminalSubmodule Terminal = TerminalSubmodule::Unwrap) {
+  return selectOptions(State, V, AttrPath.begin(), AttrPath.end(), Terminal);
 }
 
 /// \copydoc selectAttrPath

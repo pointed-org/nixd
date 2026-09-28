@@ -158,11 +158,23 @@ nix::Value getSubOptions(nix::EvalState &State, nix::Value &Type) {
 
 nix::Value nixt::selectOptions(nix::EvalState &State, nix::Value &V,
                                std::vector<nix::Symbol>::const_iterator Begin,
-                               std::vector<nix::Symbol>::const_iterator End) {
-  // Always try to mangle the value if it is a submodule
-  if (nix::Value *SubType = tryGetSubmoduleType(State, V))
-    // Invoke getSubOptions on that type, and reset the value to it.
-    V = getSubOptions(State, *SubType);
+                               std::vector<nix::Symbol>::const_iterator End,
+                               TerminalSubmodule Terminal) {
+  // Mangle the value if it is a submodule, so the next name selects among its
+  // sub-options -- but only if there is a next name. An attrpath that *ends*
+  // here has named the option itself, and mangling it unconditionally is how
+  // `foo.bar` whose type is `submodule { ... }` came back as an attrset of
+  // sub-options: no `type`, no `description`, no `declarations`, so hover
+  // rendered "missing type" and go-to-definition had nowhere to go.
+  //
+  // Completion is the caller that does want the unwrap at the end, because it
+  // pops the name being typed before asking. Hence the parameter rather than
+  // simply moving this below the early return.
+  if (Begin != End || Terminal == TerminalSubmodule::Unwrap) {
+    if (nix::Value *SubType = tryGetSubmoduleType(State, V))
+      // Invoke getSubOptions on that type, and reset the value to it.
+      V = getSubOptions(State, *SubType);
+  }
 
   if (Begin == End)
     return V;
@@ -183,12 +195,12 @@ nix::Value nixt::selectOptions(nix::EvalState &State, nix::Value &V,
 
       if (isTypeSubmodule(State, ElemType)) {
         nix::Value ElemOptions = getSubOptions(State, ElemType);
-        return selectOptions(State, ElemOptions, ++Begin, End);
+        return selectOptions(State, ElemOptions, ++Begin, End, Terminal);
       }
     }
   }
 
   // Otherwise, simply select it.
   nix::Value &Nested = selectAttr(State, V, *Begin);
-  return selectOptions(State, Nested, ++Begin, End);
+  return selectOptions(State, Nested, ++Begin, End, Terminal);
 }
