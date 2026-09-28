@@ -42,7 +42,7 @@ private:
 
   void evalExprWithProgress(AttrSetClient &Client, const EvalExprParams &Params,
                             std::string_view Description,
-                            std::function<void()> OnDone = nullptr);
+                            std::function<void(bool Ok)> OnDone = nullptr);
 
   /// \brief Restart every option worker configured with `reloadOnSave`, and
   /// evaluate its expression again.
@@ -50,6 +50,12 @@ private:
   /// Restarting is the point. An evaluator caches the files it has parsed, so
   /// re-sending the same expression to a live worker yields the same answer
   /// whatever the workspace now says.
+  ///
+  /// The replacement is built beside the worker it replaces and swapped in only
+  /// once it has a tree. Tearing the old one down first leaves every request
+  /// arriving during the evaluation to be answered by a worker that has not
+  /// evaluated anything — which reads, in an editor, as a type that flickers
+  /// away and comes back.
   void reloadOptions();
 
   /// \brief Whether a reload is running, and whether one was asked for while

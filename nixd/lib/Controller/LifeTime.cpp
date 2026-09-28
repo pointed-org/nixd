@@ -60,7 +60,7 @@ std::string getDefaultNixOSOptionsExpr() {
 void Controller::evalExprWithProgress(AttrSetClient &Client,
                                       const EvalExprParams &Params,
                                       std::string_view Description,
-                                      std::function<void()> OnDone) {
+                                      std::function<void(bool Ok)> OnDone) {
   auto Token = rand();
   auto Action = [Token, Description = std::string(Description),
                  OnDone = std::move(OnDone),
@@ -70,15 +70,19 @@ void Controller::evalExprWithProgress(AttrSetClient &Client,
         .value = WorkDoneProgressEnd{.message = "evaluated " +
                                                 std::string(Description)},
     });
-    // Before the error check: a caller waiting on this is waiting for the
-    // evaluation to be *over*, which a failed one also is. Skipping it there
-    // would wedge whatever is coalescing behind it.
-    if (OnDone)
-      OnDone();
+    // Called whether or not it worked: a caller waiting on this is waiting for
+    // the evaluation to be *over*, which a failed one also is, and skipping it
+    // there would wedge whatever is coalescing behind it. It is told which,
+    // because a caller replacing something on the strength of this should not
+    // replace it with a failure.
     if (!Resp) {
       lspserver::elog("{0} eval expr: {1}", Description, Resp.takeError());
+      if (OnDone)
+        OnDone(false);
       return;
     }
+    if (OnDone)
+      OnDone(true);
   };
   createWorkDoneProgress({Token});
   beginWorkDoneProgress({.token = Token,

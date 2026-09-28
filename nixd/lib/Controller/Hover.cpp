@@ -242,33 +242,55 @@ void Controller::onHover(const TextDocumentPositionParams &Params,
           auto Scope = std::vector<std::string>();
           const auto R = findAttrPathForOptions(N, PM, Scope);
           if (R == FindAttrPathResult::OK) {
+            // Take the best answer among the providers, not the first.
+            //
+            // They are asked in name order, and more than one may know the
+            // path — nixd starts a `nixos` provider of its own beside whatever
+            // is configured. Returning the first to answer *at all* means a
+            // provider that knows the name but not its type shadows one that
+            // knows both, and which that is can vary with what each worker has
+            // finished evaluating. In an editor that reads as a type that
+            // sometimes appears and sometimes does not.
+            //
+            // A typed answer wins. A typeless one is kept only in case nothing
+            // better arrives, so the previous behaviour is what remains when no
+            // provider can type the path.
             std::lock_guard _(OptionsLock);
+            std::optional<OptionDescription> Best;
             for (const auto &[_, Client] : Options) {
               if (AttrSetClient *C = Client->client()) {
                 OptionsHoverProvider OHP(*C);
                 std::optional<OptionDescription> Desc = OHP.resolveHover(Scope);
-                std::string Docs;
-                if (Desc) {
-                  if (Desc->Type) {
-                    std::string TypeName = Desc->Type->Name.value_or("");
-                    std::string TypeDesc = Desc->Type->Description.value_or("");
-                    Docs += llvm::formatv("{0} ({1})", TypeName, TypeDesc);
-                  } else {
-                    Docs += "? (missing type)";
-                  }
-                  if (Desc->Description) {
-                    Docs += "\n\n" + Desc->Description.value_or("");
-                  }
-                  return Hover{
-                      .contents =
-                          MarkupContent{
-                              .kind = MarkupKind::Markdown,
-                              .value = std::move(Docs),
-                          },
-                      .range = toLSPRange(TU->src(), N.range()),
-                  };
+                if (!Desc)
+                  continue;
+                if (Desc->Type) {
+                  Best = std::move(Desc);
+                  break;
                 }
+                if (!Best)
+                  Best = std::move(Desc);
               }
+            }
+            if (Best) {
+              std::string Docs;
+              if (Best->Type) {
+                std::string TypeName = Best->Type->Name.value_or("");
+                std::string TypeDesc = Best->Type->Description.value_or("");
+                Docs += llvm::formatv("{0} ({1})", TypeName, TypeDesc);
+              } else {
+                Docs += "? (missing type)";
+              }
+              if (Best->Description) {
+                Docs += "\n\n" + Best->Description.value_or("");
+              }
+              return Hover{
+                  .contents =
+                      MarkupContent{
+                          .kind = MarkupKind::Markdown,
+                          .value = std::move(Docs),
+                      },
+                  .range = toLSPRange(TU->src(), N.range()),
+              };
             }
           }
           break;

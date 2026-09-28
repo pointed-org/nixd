@@ -85,41 +85,50 @@ void Controller::reloadOptions() {
       return;
 
     OptionsReloading = true;
-
-    for (const auto &[Name, _] : Reload) {
-      // Replace the worker rather than re-evaluating in it. An evaluator caches
-      // every file it has parsed, so the same expression in the same process
-      // returns the same answer however much the workspace has changed.
-      Options[Name].reset();
-      startOption(Name, Options[Name]);
-    }
   }
 
-  // Outside the locks: the completion hook takes them, and it may run inline.
   auto Remaining = std::make_shared<std::atomic<size_t>>(Reload.size());
-  for (const auto &[Name, Expr] : Reload) {
-    AttrSetClient *Client = nullptr;
+
+  auto Finish = [this, Remaining]() {
+    if (--*Remaining != 0)
+      return;
+    bool Again = false;
     {
       std::lock_guard OG(OptionsLock);
-      if (Options[Name])
-        Client = Options[Name]->client();
+      OptionsReloading = false;
+      Again = std::exchange(OptionsReloadPending, false);
     }
-    auto Done = [this, Remaining]() {
-      if (--*Remaining != 0)
-        return;
-      bool Again = false;
-      {
-        std::lock_guard OG(OptionsLock);
-        OptionsReloading = false;
-        Again = std::exchange(OptionsReloadPending, false);
-      }
-      if (Again)
-        reloadOptions();
-    };
-    if (Client)
-      evalExprWithProgress(*Client, Expr, Name + " (reload)", Done);
-    else
-      Done();
+    if (Again)
+      reloadOptions();
+  };
+
+  for (const auto &[Name, Expr] : Reload) {
+    // Built beside the worker it replaces, not in place of it. The one already
+    // serving keeps answering — with the tree it has, which is the previous
+    // state of the workspace rather than nothing — until the replacement has
+    // evaluated. Swapping first would answer every request arriving during the
+    // evaluation from a worker that has evaluated nothing, and in an editor
+    // that reads as a type flickering away and coming back.
+    auto Fresh = std::make_shared<std::unique_ptr<AttrSetClientProc>>();
+    startOption(Name, *Fresh);
+
+    AttrSetClient *Client = *Fresh ? (*Fresh)->client() : nullptr;
+    if (!Client) {
+      Finish();
+      continue;
+    }
+
+    evalExprWithProgress(*Client, Expr, Name + " (reload)",
+                         [this, Name, Fresh, Finish](bool Ok) {
+                           if (Ok) {
+                             std::lock_guard OG(OptionsLock);
+                             // Destroys the old one, whose destructor exits it.
+                             Options[Name] = std::move(*Fresh);
+                           }
+                           // On failure the replacement is dropped instead, and
+                           // what was working goes on working.
+                           Finish();
+                         });
   }
 }
 
