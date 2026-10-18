@@ -156,7 +156,7 @@ nix::Value getSubOptions(nix::EvalState &State, nix::Value &Type) {
 
 } // namespace
 
-nix::Value nixt::selectOptions(nix::EvalState &State, nix::Value &V,
+nix::Value nixt::selectOptions(nix::EvalState &State, nix::Value &Option,
                                std::vector<nix::Symbol>::const_iterator Begin,
                                std::vector<nix::Symbol>::const_iterator End,
                                TerminalSubmodule Terminal) {
@@ -170,11 +170,17 @@ nix::Value nixt::selectOptions(nix::EvalState &State, nix::Value &V,
   // Completion is the caller that does want the unwrap at the end, because it
   // pops the name being typed before asking. Hence the parameter rather than
   // simply moving this below the early return.
-  if (Begin != End || Terminal == TerminalSubmodule::Unwrap) {
-    if (nix::Value *SubType = tryGetSubmoduleType(State, V))
-      // Invoke getSubOptions on that type, and reset the value to it.
-      V = getSubOptions(State, *SubType);
-  }
+  //
+  // The sub-options go into a local, never through `Option`: below the root it
+  // is a reference into the evaluated option tree, and writing it replaced
+  // that option in the tree for good. Walking `foo.bar` once then left every
+  // later lookup of `foo` with the sub-options rather than the option.
+  const bool Unwrap = Begin != End || Terminal == TerminalSubmodule::Unwrap;
+  nix::Value *SubType = Unwrap ? tryGetSubmoduleType(State, Option) : nullptr;
+  nix::Value SubOptions;
+  if (SubType)
+    SubOptions = getSubOptions(State, *SubType);
+  nix::Value &V = SubType ? SubOptions : Option;
 
   if (Begin == End)
     return V;

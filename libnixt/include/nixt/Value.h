@@ -52,16 +52,18 @@ enum class TerminalSubmodule {
   Unwrap,
 };
 
-/// \brief Select the option declaration list, \p V,  dive into "submodules".
-nix::Value selectOptions(nix::EvalState &State, nix::Value &V,
-                         std::vector<nix::Symbol>::const_iterator Begin,
-                         std::vector<nix::Symbol>::const_iterator End,
-                         TerminalSubmodule Terminal = TerminalSubmodule::Unwrap);
+/// \brief Select the option declaration list, \p Option,  dive into
+/// "submodules". Reads the tree it is given; never writes it.
+nix::Value
+selectOptions(nix::EvalState &State, nix::Value &Option,
+              std::vector<nix::Symbol>::const_iterator Begin,
+              std::vector<nix::Symbol>::const_iterator End,
+              TerminalSubmodule Terminal = TerminalSubmodule::Unwrap);
 
-inline nix::Value selectOptions(
-    nix::EvalState &State, nix::Value &V,
-    const std::vector<nix::Symbol> &AttrPath,
-    TerminalSubmodule Terminal = TerminalSubmodule::Unwrap) {
+inline nix::Value
+selectOptions(nix::EvalState &State, nix::Value &V,
+              const std::vector<nix::Symbol> &AttrPath,
+              TerminalSubmodule Terminal = TerminalSubmodule::Unwrap) {
   return selectOptions(State, V, AttrPath.begin(), AttrPath.end(), Terminal);
 }
 
